@@ -1,93 +1,100 @@
-# gitlab-ci-docker
+# How to deploy your Django application in 2 hours using Docker & GitLab CI/CD
 
+_Estimated reading time: 7 minutes_
 
+## Before start
 
-## Getting started
+The guide is aimed to give a reader common knowledge about using Docker and Gitlab CI/CD for Django project deployment. 
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Default demo-project contains: **Django + PostgreSQL + Celery + RabbitMQ + nginx**
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+**Docker, Docker-Compose and GitLab CI/CD** are also used for the project continuous delivery.
 
-## Add your files
+## Step 1: Create a GitLab repository
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+Create a [blank GitLab project](https://docs.gitlab.com/ee/gitlab-basics/create-project.html), 
+push your project from local machine to GitLab. After that you will probably get something like that
+![Project structure](https://pp.userapi.com/c850224/v850224063/1058e3/tEToCCj-dBk.jpg)
 
+For the guide I will use following project URL:
+
+`https://gitlab.com/your_username/your_project_name/`
+
+You have to replace `your_username` and `your_project_name` in the source code to make it work. 
+
+## Step 2: Create a Dockerfile
+
+**Source file:** [Dockerfile](Dockerfile)
+
+The second step is creating a Django & Celery image. A Docker image is a file, comprised of multiple layers,
+ used to execute code in a Docker container. A Docker image is described in `Dockerfile` by default. The most interesting commands is:
+ * `FROM python:3.6` creates a layer from the python:3.6 Docker image. You can use other versions of Python (3.5, 3.4, 2.7, ...)
+ * `RUN pip3 install -r ${APP_ROOT}/requirements.txt` installs Python dependencies
+ * `CMD  ['python3 manage.py collectstatic --noinput', '&&', '/bin/sh','-c','python manage.py runserver']` 
+ is used to set a default command for the image. However it will be over-written by a Docker-compose file.
+ 
+## Step 3: Define services in a Docker-Compose file
+
+**Source file:** [docker-compose.yml](docker-compose.yml)
+
+Using Docker-Compose is the one of the most easiest way to orchestrate all containers. 
+For each part of the project you must create an image, there are images which described in `docker-compose.yml`:
+
+* `nginx` pulls an image from Docker Hub. The volume section overrides a default nginx config with the `devops/nginx.conf`
+* `web` is the main Django application's service that uses a Docker image created in the [Docker chapter](#docker)
+* `postgres` service. Using all default settings
+* `rabbit` uses `rabbitmq:3.7-management` which automatically run RabbitMQ admin web interface
+* `celery` service also using an previously created `Dockerfile`
+
+## Step 4: Connect containers using environment variables
+**Source file:** [.env](.env)
+
+A module called `envparse` will be used to export environment variables.
+
+First of all, add it to `requirements.txt`. Then create `.env` at the root of the project:
+
+```.dotenv
+POSTGRES_DB=postgres
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+CELERY_BROKER_URL=amqp://rabbitmq:rabbitmq@rabbit:5672/
+DJANGO_SETTINGS_MODULE=conf.settings
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/info.anil.kumar1640/gitlab-ci-docker.git
-git branch -M main
-git push -uf origin main
-```
 
-## Integrate with your tools
+## Step 5: Create GitLab CI/CD pipeline
+**Source file:** [.gitlab-ci.yml](.gitlab-ci.yml)
 
-- [ ] [Set up project integrations](https://gitlab.com/info.anil.kumar1640/gitlab-ci-docker/-/settings/integrations)
+For the education purposes `.gitlab-ci.yml` contains only 2 basic steps: 
+* `build` step builds Django application image and push it to a private registry. Substitute a registry URL by your own link.
+* `deploy` step logins to a server via ssh and pulls changes from registry
 
-## Collaborate with your team
+The deploy step uses a `devops/deploy.sh` file. You have to change it: replace **47.47.47.47** to your remote address IP
+and replace registry URL:
+> docker pull registry.gitlab.com/your_username/your_project_name:latest
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+## Step 6: Push new files
 
-## Test and Deploy
+Push all new files and directories (`Dockerfile`, `docker-compose.yml`, `.gitlab-ci.yml`, `devops/`) to the branch `master`.
 
-Use the built-in continuous integration in GitLab.
+## Step 7: Generate SSH keys
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Locally run a command `ssh-keygen -t rsa`, it will prompt you to enter passphrase - **leave it blank**. 
+The command generates two files with two keys: public and private. 
 
-***
+Copy the public key to your server `~/.ssh/authorized_keys` file.
 
-# Editing this README
+Also you must to set a CI/CD environment variable called `DEPLOY_KEY` to your private key. 
+Go to **GitLab project page - Settings - CI / CD - Environment variables** and create a variable 
+![Set variable](https://pp.userapi.com/c854120/v854120736/8f3a/C-NCoEPFCBg.jpg)
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## Step 8: Clone a project
 
-## Suggestions for a good README
+Log in the remote server via ssh and clone a project at the root:
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+`git clone https://gitlab.com/your_username/your_project_name.git`
 
-## Name
-Choose a self-explaining name for your project.
+## Step 9. Make a commit to prove that everything works fine
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Or create an issue to make me now that the guide has a mistake
